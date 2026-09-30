@@ -1,6 +1,6 @@
 # Trace storage foundation
 
-This crate owns the initial ClickHouse schema, insert row encoding and parameterized read transport. Python adapters use `trace_ensure_schema`, `trace_encode_rows` and `trace_query` from the native bridge. HTTP endpoints, ingestion and trace response assembly belong to the integration built on this foundation
+This crate owns OTLP parsing, the initial ClickHouse schema, insert transport and parameterized read transport. Python uses `trace_decode_otlp` and `NativeTraceStorage` from the native bridge. Framework normalization, HTTP endpoints, batching and trace response assembly remain in Python
 
 The SQL files under `migrations/` are the canonical definitions for `otel_traces`, `agent_traces`, its materialized view, and `spend_logs`. `ensure_schema` applies them in order using writer credentials and checks each response. Setup is repeatable for a new installation; these initial `CREATE IF NOT EXISTS` statements do not upgrade an existing incompatible table. Future schema changes need explicit upgrade statements
 
@@ -14,4 +14,4 @@ Keep reader, ingestion and migration credentials separate. Do not grant the read
 
 Run `cargo test -p litellm-traces -- --test-threads=2` from `litellm-rust`. Testcontainers applies the canonical schema, checks span rollups and spend joins, and exercises reader permissions, parameter binding, credentials and response limits
 
-`encode_rows` produces JSONEachRow and formats span nanoseconds and spend-log milliseconds as UTC DateTime64 strings without losing precision. The integration owns compression, batching and writes
+`insert_rows` encodes JSONEachRow, formats span nanoseconds and spend-log milliseconds as UTC DateTime64 strings, compresses the body and sends it with writer credentials. Python owns batching

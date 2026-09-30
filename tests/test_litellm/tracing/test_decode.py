@@ -21,7 +21,9 @@ from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Span, Status
 
 from litellm.tracing import decode
-from litellm.tracing.decode import decode_otlp, encode_otlp_response, hex_id
+from litellm.tracing.decode import decode_otlp, encode_otlp_response
+
+pytestmark = pytest.mark.requires_rust_extension
 
 FIXTURE = Path(__file__).parent / "fixtures" / "langsmith_deep_agent_export.json"
 TRACE_ID = "4bad42b84e9de3ba46fc870185f8f023"
@@ -297,8 +299,3 @@ def test_encode_otlp_response_matches_request_encoding():
     assert encode_otlp_response("application/json") == (b"{}", "application/json")
     assert encode_otlp_response("application/x-protobuf") == (b"", "application/x-protobuf")
     assert encode_otlp_response(None) == (b"", "application/x-protobuf")
-
-
-def test_hex_id():
-    assert hex_id("S61CuE6d47pG/IcBhfjwIw==") == TRACE_ID
-    assert hex_id("") == ""

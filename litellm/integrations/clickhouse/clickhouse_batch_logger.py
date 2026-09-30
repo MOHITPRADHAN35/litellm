@@ -20,24 +20,22 @@ from litellm.constants import (
     CLICKHOUSE_MAX_BUFFERED_ROWS,
     CLICKHOUSE_MAX_RETRIES,
 )
-from litellm.integrations.clickhouse.clickhouse_client import ClickHouseClient
 from litellm.integrations.custom_batch_logger import CustomBatchLogger
+from litellm.rust_bridge.traces import TraceStorage
 
 
-def clickhouse_client_from_env() -> ClickHouseClient:
-    return ClickHouseClient(
-        url=os.getenv("CLICKHOUSE_URL", ""),
-        user=os.getenv("CLICKHOUSE_USER", "default"),
-        password=os.getenv("CLICKHOUSE_PASSWORD", ""),
+def clickhouse_storage_from_env() -> TraceStorage:
+    return TraceStorage(
         database=os.getenv("CLICKHOUSE_DATABASE", "litellm"),
+        url=os.getenv("CLICKHOUSE_URL", ""),
     )
 
 
 class ClickHouseBatchLogger(CustomBatchLogger):
     table: ClassVar[str]
 
-    def __init__(self, client: ClickHouseClient | None = None, **kwargs: Any) -> None:
-        self.client = client or clickhouse_client_from_env()
+    def __init__(self, storage: TraceStorage | None = None, **kwargs: Any) -> None:
+        self.storage = storage or clickhouse_storage_from_env()
         self.rows_written = 0
         self.rows_dropped = 0
         self._failed_attempts = 0
@@ -81,7 +79,7 @@ class ClickHouseBatchLogger(CustomBatchLogger):
 
     async def _insert(self, batch: list[dict[str, Any]]) -> bool:
         try:
-            await self.client.insert_json_each_row(self.table, batch)
+            await self.storage.insert_rows(self.table, batch)
             self.rows_written += len(batch)
             self._failed_attempts = 0
             return True
