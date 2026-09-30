@@ -53,7 +53,7 @@ impl NativeTraceStorage {
         let client = crate::http::host_client(py, ClientVariant::NoRedirect)?;
         let connection = self.writer.clone();
         let database = self.database.clone();
-        litellm_host_python::run_async(
+        crate::logger::run_async(
             py,
             async move {
                 litellm_traces::ensure_schema(
@@ -81,7 +81,7 @@ impl NativeTraceStorage {
         let client = crate::http::host_client(py, ClientVariant::NoRedirect)?;
         let connection = self.writer.clone();
         let database = self.database.clone();
-        litellm_host_python::run_async(
+        crate::logger::run_async(
             py,
             async move {
                 litellm_traces::insert_rows(&client, &connection, &database, table, rows).await
@@ -103,7 +103,7 @@ impl NativeTraceStorage {
             PyRuntimeError::new_err("Trace reads require a separate ClickHouse reader URL")
         })?;
         let client = crate::http::host_client(py, ClientVariant::NoRedirect)?;
-        litellm_host_python::run_async(
+        crate::logger::run_async(
             py,
             async move { litellm_traces::execute_read(&client, &connection, &sql, &parameters).await },
             map_error,
