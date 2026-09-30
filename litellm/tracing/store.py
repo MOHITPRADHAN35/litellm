@@ -12,12 +12,12 @@ from typing import Any, Final
 
 from litellm.constants import AGENT_TRACING_LIST_PAGE_SIZE
 from litellm.integrations.clickhouse.clickhouse_batch_logger import ClickHouseBatchLogger
-from litellm.integrations.clickhouse.clickhouse_client import ClickHouseClient
 from litellm.integrations.clickhouse.schema import (
     AGENT_TRACES_TABLE,
     OTEL_TRACES_TABLE,
     SPEND_LOGS_TABLE,
 )
+from litellm.rust_bridge.traces import TraceStorage
 from litellm.tracing.types import (
     AgentNode,
     LiteLLMRequest,
@@ -295,9 +295,9 @@ class _SpanBatchWriter(ClickHouseBatchLogger):
 class ClickHouseTraceStore:
     """Writes spans in batches (never blocks the caller) and runs scoped trace reads."""
 
-    def __init__(self, client: ClickHouseClient):
-        self.client = client
-        self.writer = _SpanBatchWriter(client=client)
+    def __init__(self, storage: TraceStorage):
+        self.storage = storage
+        self.writer = _SpanBatchWriter(storage=storage)
 
     def is_full(self) -> bool:
         return self.writer.is_full()
@@ -317,7 +317,7 @@ class ClickHouseTraceStore:
         limit: int = AGENT_TRACING_LIST_PAGE_SIZE,
     ) -> TracePage:
         cursor_ms, cursor_trace_id = decode_cursor(cursor)
-        rows = await self.client.query(
+        rows = await self.storage.query(
             LIST_TRACES_SQL,
             {
                 **scope,
@@ -332,11 +332,11 @@ class ClickHouseTraceStore:
         return TracePage(data=[trace_summary_from_row(r) for r in rows], next_cursor=next_cursor)
 
     async def get_trace(self, trace_id: str, scope: TraceScope) -> Trace | None:
-        rows = await self.client.query(TRACE_SPANS_SQL, {**scope, "trace_id": trace_id})
+        rows = await self.storage.query(TRACE_SPANS_SQL, {**scope, "trace_id": trace_id})
         return trace_from_rows(trace_id, rows)
 
     async def get_span(self, trace_id: str, span_id: str, scope: TraceScope) -> SpanDetail | None:
-        rows = await self.client.query(SPAN_DETAIL_SQL, {**scope, "trace_id": trace_id, "span_id": span_id})
+        rows = await self.storage.query(SPAN_DETAIL_SQL, {**scope, "trace_id": trace_id, "span_id": span_id})
         if not rows:
             return None
         return SpanDetail(

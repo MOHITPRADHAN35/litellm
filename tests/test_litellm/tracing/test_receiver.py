@@ -14,8 +14,10 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Span
 
-from litellm.tracing import receiver as receiver_module
 from litellm.tracing import Tenant, TraceReceiver, TracingBackpressureError, TracingPayloadTooLargeError
+from litellm.tracing import receiver as receiver_module
+
+pytestmark = pytest.mark.requires_rust_extension
 
 FIXTURE = Path(__file__).parent / "fixtures" / "langsmith_deep_agent_export.json"
 TENANT = Tenant(team_id="team-research", api_key_hash="hashed-key", org_id="org-1")

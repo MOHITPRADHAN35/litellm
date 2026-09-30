@@ -20,9 +20,9 @@ class _TestLogger(ClickHouseBatchLogger):
 
 
 def _logger(insert: AsyncMock) -> _TestLogger:
-    client = MagicMock()
-    client.insert_json_each_row = insert
-    return _TestLogger(client=client)
+    storage = MagicMock()
+    storage.insert_rows = insert
+    return _TestLogger(storage=storage)
 
 
 def test_is_a_custom_batch_logger():

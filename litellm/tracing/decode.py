@@ -8,21 +8,13 @@ Pure functions, no I/O. Two steps:
                      Deep Agents), OTEL GenAI semconv, OpenInference.
 """
 
-import base64
-import gzip
 import json
 from collections.abc import Callable, Mapping
 from typing import Any, Final
 
-from google.protobuf.json_format import Parse  # type: ignore[import-untyped]
-from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (  # type: ignore[import-untyped]
-    ExportTraceServiceRequest,
-)
-from opentelemetry.proto.common.v1.common_pb2 import AnyValue  # type: ignore[import-untyped]
-from opentelemetry.proto.trace.v1.trace_pb2 import Span as OtlpSpan  # type: ignore[import-untyped]
-from opentelemetry.proto.trace.v1.trace_pb2 import Status  # type: ignore[import-untyped]
-
-from litellm.constants import OTLP_MAX_ATTRIBUTE_VALUE_BYTES
+from litellm.constants import OTLP_MAX_ATTRIBUTE_VALUE_BYTES, OTLP_MAX_BODY_BYTES
+from litellm.rust_bridge.traces import DecodedSpan
+from litellm.rust_bridge.traces import decode_otlp as native_decode_otlp
 from litellm.tracing.types import SpanRow, SpanType
 
 # attributes whose content we lift into Input/Output and drop from SpanAttributes
@@ -54,21 +46,6 @@ _OPENINFERENCE_TYPES: Final[dict[str, SpanType]] = {"AGENT": "agent", "LLM": "ll
 # ---------------------------------------------------------------- decode
 
 
-def _any_value(value: AnyValue) -> str:
-    field = value.WhichOneof("value")
-    if field is None:
-        return ""
-    if field == "bytes_value":
-        return value.bytes_value.decode("utf-8", "replace")
-    if field == "array_value":
-        return json.dumps([_any_value(v) for v in value.array_value.values])
-    if field == "kvlist_value":
-        return json.dumps({kv.key: _any_value(kv.value) for kv in value.kvlist_value.values})
-    if field == "bool_value":
-        return "true" if value.bool_value else "false"
-    return str(getattr(value, field))
-
-
 def _truncate(value: str) -> str:
     size = len(value.encode("utf-8"))
     if size <= OTLP_MAX_ATTRIBUTE_VALUE_BYTES:
@@ -77,60 +54,39 @@ def _truncate(value: str) -> str:
     return f"{kept}…[truncated {size - OTLP_MAX_ATTRIBUTE_VALUE_BYTES} bytes]"
 
 
-def _attributes(key_values) -> dict[str, str]:
-    return {kv.key: _any_value(kv.value) for kv in key_values}
-
-
-def _parse_request(body: bytes, content_type: str | None, content_encoding: str | None) -> ExportTraceServiceRequest:
-    if content_encoding == "gzip" or body[:2] == b"\x1f\x8b":
-        body = gzip.decompress(body)
-    request = ExportTraceServiceRequest()
-    if content_type and "json" in content_type:
-        Parse(body.decode("utf-8"), request, ignore_unknown_fields=True)
-    else:
-        request.ParseFromString(body)
-    return request
-
-
 def decode_otlp(body: bytes, content_type: str | None = None, content_encoding: str | None = None) -> list[SpanRow]:
     """Decode an OTLP trace export and normalize every span."""
-    request = _parse_request(body, content_type, content_encoding)
-    rows: list[SpanRow] = []
-    for resource_spans in request.resource_spans:
-        resource = _attributes(resource_spans.resource.attributes)
-        for scope_spans in resource_spans.scope_spans:
-            for span in scope_spans.spans:
-                rows.append(_span_row(span, resource, scope_spans.scope.name, scope_spans.scope.version))
-    return rows
+    return [_span_row(span) for span in native_decode_otlp(body, content_type, content_encoding, OTLP_MAX_BODY_BYTES)]
 
 
-def _exception_message(span: OtlpSpan) -> str:
+def _exception_message(span: DecodedSpan) -> str:
     """`span.record_exception()` writes an `exception` event; surface it when status.message is empty."""
-    for event in span.events:
-        if event.name == "exception":
-            attributes = _attributes(event.attributes)
+    for event in span["events"]:
+        if event["name"] == "exception":
+            attributes = event["attributes"]
             return attributes.get("exception.message") or attributes.get("exception.type", "")
     return ""
 
 
-def _span_row(span: OtlpSpan, resource: dict[str, str], scope_name: str, scope_version: str) -> SpanRow:
-    attributes = _attributes(span.attributes)
+def _span_row(span: DecodedSpan) -> SpanRow:
+    attributes = span["attributes"]
+    resource = span["resource_attributes"]
     row = SpanRow(
-        Timestamp=span.start_time_unix_nano,
-        TraceId=span.trace_id.hex(),
-        SpanId=span.span_id.hex(),
-        ParentSpanId=span.parent_span_id.hex(),
-        TraceState=span.trace_state,
-        SpanName=span.name,
-        SpanKind=OtlpSpan.SpanKind.Name(span.kind),
+        Timestamp=span["start_ns"],
+        TraceId=span["trace_id"],
+        SpanId=span["span_id"],
+        ParentSpanId=span["parent_span_id"],
+        TraceState=span["trace_state"],
+        SpanName=span["name"],
+        SpanKind=span["kind"],
         ServiceName=resource.get("service.name", ""),
         ResourceAttributes=resource,
-        ScopeName=scope_name,
-        ScopeVersion=scope_version,
+        ScopeName=span["scope_name"],
+        ScopeVersion=span["scope_version"],
         SpanAttributes={},
-        Duration=max(span.end_time_unix_nano - span.start_time_unix_nano, 0),
-        StatusCode=Status.StatusCode.Name(span.status.code),
-        StatusMessage=span.status.message or _exception_message(span),
+        Duration=max(span["end_ns"] - span["start_ns"], 0),
+        StatusCode=span["status_code"],
+        StatusMessage=span["status_message"] or _exception_message(span),
         TeamId="",
         ApiKeyHash="",
         ObservationType="chain",
@@ -287,8 +243,3 @@ def encode_otlp_response(content_type: str | None) -> tuple[bytes, str]:
     if content_type and "json" in content_type:
         return b"{}", "application/json"
     return b"", "application/x-protobuf"
-
-
-def hex_id(b64: str) -> str:
-    """base64 (OTLP/JSON id encoding) -> hex."""
-    return base64.b64decode(b64).hex() if b64 else ""

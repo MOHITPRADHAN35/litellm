@@ -35,8 +35,8 @@ litellm_settings:
 ```
 
 ```bash
-CLICKHOUSE_URL=http://localhost:8123 CLICKHOUSE_USER=writer CLICKHOUSE_PASSWORD=... CLICKHOUSE_DATABASE=litellm
-CLICKHOUSE_READER_USER=litellm_traces_reader CLICKHOUSE_READER_PASSWORD=...
+CLICKHOUSE_URL=http://writer:password@localhost:8123 CLICKHOUSE_DATABASE=litellm
+CLICKHOUSE_READER_URL=http://litellm_traces_reader:password@localhost:8123
 ```
 
 Tables are created on startup if they don't exist. Agent side (LangSmith's built-in OTEL exporter, no LangSmith account needed):
@@ -249,10 +249,10 @@ When no spend row matches, `spend` is null and the UI shows an unavailable cost 
 
 ## Rust foundation
 
-Tracing requires the compiled Rust extension from the foundation PR. Rust owns the canonical SQL schema, insert row encoding and parameterized read transport; Python handles ingestion, batching, trace response assembly and FastAPI integration in this incremental migration
+Tracing requires the compiled Rust extension from the foundation PR. Rust parses OTLP, executes the canonical schema setup, encodes insert rows and sends parameterized reads. Python handles framework normalization, tenant stamping, batching, trace response assembly and FastAPI integration
 
-Configure `CLICKHOUSE_READER_USER` and `CLICKHOUSE_READER_PASSWORD` separately from the credentials used for setup and ingestion. Grant the reader SELECT on the configured database's `otel_traces`, `agent_traces` and `spend_logs`, with the locked profile in `litellm-rust/crates/traces/config/reader.xml`. Change the example database grants from `default` to `CLICKHOUSE_DATABASE`. Query settings alone do not restrict a privileged account
+Configure `CLICKHOUSE_READER_URL` with an account separate from the writer URL. Grant the reader SELECT on the configured database's `otel_traces`, `agent_traces` and `spend_logs`, with the locked profile in `litellm-rust/crates/traces/config/reader.xml`. Change the example database grants from `default` to `CLICKHOUSE_DATABASE`. Query settings alone do not restrict a privileged account
 
 Read requests have a 10-second query limit, a 15-second HTTP timeout, a 1,000-row result limit and a 4 MiB response cap. Exceeding these limits fails the request rather than returning a silently truncated trace
 
-Schema setup calls the Rust schema export. There is no second Python DDL definition. The initial schema creates missing objects and does not migrate incompatible existing tables
+Schema setup runs in Rust with writer credentials. There is no second Python DDL definition. The initial schema creates missing objects and does not migrate incompatible existing tables

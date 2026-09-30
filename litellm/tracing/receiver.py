@@ -22,8 +22,8 @@ from litellm.constants import (
     OTLP_MAX_BODY_BYTES,
     OTLP_OFFLOAD_DECODE_BYTES,
 )
-from litellm.integrations.clickhouse.clickhouse_client import ClickHouseClient
 from litellm.integrations.clickhouse.schema import ensure_schema
+from litellm.rust_bridge.traces import TraceStorage
 from litellm.tracing.decode import decode_otlp
 from litellm.tracing.store import ClickHouseTraceStore
 from litellm.tracing.types import (
@@ -71,20 +71,17 @@ class TraceReceiver:
     def from_env(cls) -> "TraceReceiver":
         return cls(
             store=ClickHouseTraceStore(
-                ClickHouseClient(
-                    url=os.environ["CLICKHOUSE_URL"],
-                    user=os.getenv("CLICKHOUSE_USER", "default"),
-                    password=os.getenv("CLICKHOUSE_PASSWORD", ""),
+                TraceStorage(
                     database=os.getenv("CLICKHOUSE_DATABASE", "litellm"),
-                    reader_user=os.environ["CLICKHOUSE_READER_USER"],
-                    reader_password=os.environ["CLICKHOUSE_READER_PASSWORD"],
+                    url=os.environ["CLICKHOUSE_URL"],
+                    reader_url=os.environ["CLICKHOUSE_READER_URL"],
                 )
             )
         )
 
     async def start(self) -> None:
         await ensure_schema(
-            self.store.client,
+            self.store.storage,
             trace_retention_days=AGENT_TRACING_RETENTION_DAYS,
             spend_log_retention_days=AGENT_TRACING_SPEND_LOG_RETENTION_DAYS,
         )
